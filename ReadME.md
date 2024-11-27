@@ -1,3 +1,6 @@
+# Conditional GAN Implementation Based on [Pix2Pix](https://arxiv.org/abs/1611.07004)
+* The aim here is to generate robust OFDM channels conditioned on channel at pilot positions.
+
 # Training 
 ### Basic usage with default parameters
 `python train.py`
