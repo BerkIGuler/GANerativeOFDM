@@ -2,6 +2,7 @@ import torch
 
 
 class PatchDiscriminator(torch.nn.Module):
+    # TODO: try spectral normalization
     """A discriminator that classifies patches of an image as real or fake.
 
     This implements the PatchGAN architecture from the pix2pix paper, which classifies
@@ -20,7 +21,7 @@ class PatchDiscriminator(torch.nn.Module):
     """
 
     def __init__(self,
-                 in_channels: int = 2,
+                 in_channels: int = 4,
                  base_filters: int = 16,
                  norm_layer: torch.nn.Module = torch.nn.BatchNorm2d):
         super().__init__()

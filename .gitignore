@@ -1,3 +1,6 @@
 .idea/
 dataset/
+experiments/
+outputs
+results
 __pycache__/

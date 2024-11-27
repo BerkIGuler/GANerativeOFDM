@@ -1,0 +1,11 @@
+python train.py \
+    --train_path dataset/train \
+    --val_path dataset/val \
+    --output_dir experiments/run1 \
+    --batch_size 256 \
+    --lr 0.0001 \
+    --lambda_l1 100 \
+    --dropout 0.3 \
+    --num_epochs 10 \
+    --save_freq 5 \
+    --device cuda

@@ -8,8 +8,9 @@ from typing import Callable, List, Optional, Tuple, Union
 import scipy.io as sio
 import torch
 from torch.utils.data import Dataset, DataLoader
+from torchgen.executorch.api.et_cpp import return_type
 
-from utils import ComplexChannelProcessor, ChannelInfo
+from utils import ComplexChannelProcessor
 
 __all__ = ["MatDataset", "get_test_dataloaders"]
 
@@ -19,7 +20,8 @@ class ReturnType(Enum):
     TWO_CHANNEL = "2channel"
     COMPLEX = "complex"
     CONCAT_TIME = "concat_time"
-    INTERPOLATED_COMPLEX = "interpolated_complex"
+    INTERPOLATED_COMPLEX = "interpolated_complex",
+    TWO_CHANNEL_ZERO = "2channel_zero"
 
     @classmethod
     def from_string(cls, value: str) -> "ReturnType":
@@ -61,7 +63,7 @@ class MatDataset(Dataset):
         data_dir: Union[str, Path],
         pilot_dims: Tuple[int, int],
         transform: Optional[Callable] = None,
-        return_type: str = "2channel"
+        return_type: str = "2channel_zero"
     ) -> None:
         """Initialize the MatDataset.
 
@@ -114,20 +116,24 @@ class MatDataset(Dataset):
             # Extract LS channel estimate including zero entries
             hzero_ls = torch.tensor(mat_data["H"][:, :, 1], dtype=torch.cfloat)
 
-            # Remove zero entries, keep only pilot values (non-zero values)
-            zero_complex = torch.complex(torch.tensor(0.0), torch.tensor(0.0))
-            hp_ls = hzero_ls[hzero_ls != zero_complex]
+            if self.return_type == ReturnType.TWO_CHANNEL or self.return_type == ReturnType.COMPLEX:
+                # Remove zero entries, keep only pilot values (non-zero values)
+                zero_complex = torch.complex(torch.tensor(0.0), torch.tensor(0.0))
+                hp_ls = hzero_ls[hzero_ls != zero_complex]
 
-            if hp_ls.numel() != (self.pilot_dims.num_subcarriers *
-                               self.pilot_dims.num_ofdm_symbols):
-                raise ValueError("Unexpected number of non-zero elements in channel estimate")
+                if hp_ls.numel() != (self.pilot_dims.num_subcarriers *
+                                   self.pilot_dims.num_ofdm_symbols):
+                    raise ValueError("Unexpected number of non-zero elements in channel estimate")
 
-            hp_ls = hp_ls.unsqueeze(dim=1).view(
-                self.pilot_dims.num_ofdm_symbols,
-                self.pilot_dims.num_subcarriers
-            ).t()
+                hp_ls = hp_ls.unsqueeze(dim=1).view(
+                    self.pilot_dims.num_ofdm_symbols,
+                    self.pilot_dims.num_subcarriers
+                ).t()
 
-            if self.return_type == ReturnType.TWO_CHANNEL:
+            elif self.return_type == ReturnType.TWO_CHANNEL_ZERO:
+                hp_ls = hzero_ls
+
+            if self.return_type == ReturnType.TWO_CHANNEL or self.return_type == ReturnType.TWO_CHANNEL_ZERO:
                 # Split and concatenate real and imaginary parts
                 h_est = torch.cat([
                     torch.real(hp_ls).unsqueeze(0),
@@ -209,7 +215,7 @@ class MatDataset(Dataset):
             h_ideal = torch.tensor(mat_data["H"][:, :, 0], dtype=torch.cfloat)
 
             # Process data based on return type
-            if self.return_type in (ReturnType.TWO_CHANNEL, ReturnType.COMPLEX):
+            if self.return_type in (ReturnType.TWO_CHANNEL, ReturnType.COMPLEX, ReturnType.TWO_CHANNEL_ZERO):
                 h_est, h_ideal = self._process_2channel_complex(h_ideal, mat_data)
             else:
                 h_est, h_ideal = self._process_time_based(h_ideal, mat_data)
