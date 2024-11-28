@@ -45,7 +45,6 @@ def create_parser():
 
     # Device
     parser.add_argument('--device', type=str, default='cuda',
-                        choices=['cuda', 'cpu'],
                         help='Device to use for training')
 
     # Debug mode
