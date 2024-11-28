@@ -18,6 +18,8 @@ def create_parser():
                         help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=128,
                         help='Training batch size')
+    parser.add_argument('--d_loss_coef', type=float, default=0.5,
+                        help='Discriminator loss coefficient')
     parser.add_argument('--lr', type=float, default=0.0002,
                         help='Learning rate')
     parser.add_argument('--beta1', type=float, default=0.5,

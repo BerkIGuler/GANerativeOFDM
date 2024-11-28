@@ -15,8 +15,10 @@ class CGANTrainer:
             lr: float = 0.0002,
             beta1: float = 0.5,
             beta2: float = 0.999,
+            discriminator_loss_coefficient: float = 1.0,
             device: Union[str, torch.device] = 'cuda' if torch.cuda.is_available() else 'cpu'
     ):
+        self.discriminator_loss_coefficient = discriminator_loss_coefficient
         self.generator = generator.to(device)
         self.discriminator = discriminator.to(device)
         self.lambda_l1 = lambda_l1
@@ -71,7 +73,7 @@ class CGANTrainer:
         loss_D_fake = self.criterion_GAN(pred_fake, label_fake)
 
         # Combined D loss (divided by 2 as mentioned in the paper)
-        loss_D = (loss_D_real + loss_D_fake) * 0.5
+        loss_D = (loss_D_real + loss_D_fake) * self.discriminator_loss_coefficient
         loss_D.backward()
         self.optimizer_D.step()
 

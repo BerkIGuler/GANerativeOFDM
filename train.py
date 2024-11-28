@@ -68,7 +68,8 @@ def main():
         lr=args.lr,
         beta1=args.beta1,
         beta2=args.beta2,
-        device=device
+        device=device,
+        discriminator_loss_coefficient=args.d_loss_coef
     )
 
     # Resume from checkpoint if specified
