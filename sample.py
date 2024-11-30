@@ -8,7 +8,7 @@ import json
 import matplotlib.pyplot as plt
 
 from generator import UNet
-from dataloader import MatDataset
+from dataloader import get_test_dataloaders
 
 
 def create_parser():
@@ -32,7 +32,6 @@ def create_parser():
 
     # Device
     parser.add_argument('--device', type=str, default='cuda',
-                        choices=['cuda', 'cpu'],
                         help='Device to use for sampling')
 
     return parser
@@ -65,13 +64,43 @@ def calculate_mse_db(generator, dataloader, device):
     return np.array(mse_list)
 
 
-def plot_mse_histogram(mse_values, output_path):
+def calculate_statistics(mse_db_values):
+    """Calculate statistics for MSE values"""
+    return {
+        'num_samples': len(mse_db_values),
+        'mean_mse_db': float(np.mean(mse_db_values)),
+        'median_mse_db': float(np.median(mse_db_values)),
+        'std_mse_db': float(np.std(mse_db_values)),
+        'min_mse_db': float(np.min(mse_db_values)),
+        'max_mse_db': float(np.max(mse_db_values)),
+        'percentile_5': float(np.percentile(mse_db_values, 5)),
+        'percentile_95': float(np.percentile(mse_db_values, 95))
+    }
+
+
+def plot_mse_histogram(mse_values, output_path, dataset_name):
     """Plot histogram of MSE values"""
     plt.figure(figsize=(10, 6))
     plt.hist(mse_values, bins=50, edgecolor='black')
     plt.xlabel('MSE (dB)')
     plt.ylabel('Count')
-    plt.title('Distribution of MSE Values')
+    plt.title(f'Distribution of MSE Values - {dataset_name}')
+    plt.grid(True)
+    plt.savefig(output_path)
+    plt.close()
+
+
+def plot_combined_histogram(all_mse_values, dataset_names, output_path):
+    """Plot combined histogram of MSE values from all datasets"""
+    plt.figure(figsize=(12, 8))
+
+    for mse_values, name in zip(all_mse_values, dataset_names):
+        plt.hist(mse_values, bins=50, alpha=0.5, label=name)
+
+    plt.xlabel('MSE (dB)')
+    plt.ylabel('Count')
+    plt.title('Distribution of MSE Values - All Datasets')
+    plt.legend()
     plt.grid(True)
     plt.savefig(output_path)
     plt.close()
@@ -95,42 +124,57 @@ def main():
     generator.load_state_dict(checkpoint['generator_state_dict'])
     generator.eval()
 
-    # Create dataloader
-    dataset = MatDataset(data_dir=args.data_path, pilot_dims=tuple(args.pilot_dims))
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)  # No need to shuffle for evaluation
+    # Create dataloaders for each subfolder
+    test_dataloaders = get_test_dataloaders(args.data_path, vars(args))
 
-    # Calculate MSE in dB scale for all samples
-    mse_db_values = calculate_mse_db(generator, dataloader, device)
+    # Dictionary to store results for all datasets
+    all_results = {}
+    all_mse_values = []
+    dataset_names = []
 
-    # Calculate statistics
-    stats = {
-        'num_samples': len(mse_db_values),
-        'mean_mse_db': float(np.mean(mse_db_values)),
-        'median_mse_db': float(np.median(mse_db_values)),
-        'std_mse_db': float(np.std(mse_db_values)),
-        'min_mse_db': float(np.min(mse_db_values)),
-        'max_mse_db': float(np.max(mse_db_values)),
-        'percentile_5': float(np.percentile(mse_db_values, 5)),
-        'percentile_95': float(np.percentile(mse_db_values, 95))
-    }
+    # Process each dataset
+    for dataset_name, dataloader in test_dataloaders:
+        print(f"\nProcessing dataset: {dataset_name}")
 
-    # Save results
+        # Calculate MSE in dB scale for all samples
+        mse_db_values = calculate_mse_db(generator, dataloader, device)
+        all_mse_values.append(mse_db_values)
+        dataset_names.append(dataset_name)
+
+        # Calculate statistics for this dataset
+        stats = calculate_statistics(mse_db_values)
+        all_results[dataset_name] = stats
+
+        # Plot individual histogram
+        plot_path = output_dir / f'mse_distribution_{dataset_name}.png'
+        plot_mse_histogram(mse_db_values, plot_path, dataset_name)
+
+        # Print results for this dataset
+        print(f"\nResults for {dataset_name}:")
+        print(f"Number of test samples: {stats['num_samples']}")
+        print("\nMSE Statistics (dB):")
+        for key, value in stats.items():
+            if key != 'num_samples':
+                print(f"{key}: {value:.2f}")
+
+    # Calculate aggregated statistics across all datasets
+    all_mse_combined = np.concatenate(all_mse_values)
+    all_results['combined'] = calculate_statistics(all_mse_combined)
+
+    # Plot combined histogram
+    combined_plot_path = output_dir / 'mse_distribution_combined.png'
+    plot_combined_histogram(all_mse_values, dataset_names, combined_plot_path)
+
+    # Save all results
     results_file = output_dir / 'sampling_results.json'
     with open(results_file, 'w') as f:
-        json.dump(stats, f, indent=4)
+        json.dump(all_results, f, indent=4)
 
-    # Plot histogram
-    plot_path = output_dir / 'mse_distribution.png'
-    plot_mse_histogram(mse_db_values, plot_path)
-
-    # Print results
-    print("\nSampling Results:")
-    print(f"Number of test samples: {stats['num_samples']}")
-    print("\nMSE Statistics (dB):")
-    for key, value in stats.items():
+    print(f"\nAll results saved to {output_dir}")
+    print("\nCombined Statistics across all datasets:")
+    for key, value in all_results['combined'].items():
         if key != 'num_samples':
             print(f"{key}: {value:.2f}")
-    print(f"\nResults saved to {output_dir}")
 
 
 if __name__ == '__main__':

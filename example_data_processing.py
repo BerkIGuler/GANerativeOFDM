@@ -8,7 +8,6 @@ from dataloader import MatDataset
 from pathlib import Path
 from torch.utils.data import DataLoader
 from utils import ChannelVisualizer
-import matplotlib.pyplot as plt
 
 # Directory configuration for dataset
 DATA_DIR = Path("./dataset").resolve()
@@ -19,7 +18,7 @@ PILOT_DIMS = (18, 2)
 
 # Data transformation settings
 TRANSFORM = None
-RETURN_TYPE = "complex"  # Return complex-valued channel responses
+RETURN_TYPE = "complex_zero"  # Return complex-valued channel responses
 BATCH_SIZE = 8  # Number of samples per batch
 
 
@@ -50,20 +49,17 @@ def main():
     first_batch = next(dataloader.__iter__())
     h_estimated, h_ideal, _ = first_batch
 
-    # Print tensor dimensions for verification
-    print(h_estimated.size())  # Expected: [batch_size, num_subcarriers, num_antennas]
-    print(h_ideal.size())  # Expected: [batch_size, num_subcarriers, num_antennas]
-
     # Create visualizer object using ground truth channel responses
-    visualizer = ChannelVisualizer(h_ideal)
+    vis_est = ChannelVisualizer(h_estimated)
+    vis_ideal = ChannelVisualizer(h_ideal)
 
     # Generate plots for magnitude and phase responses
-    mag_fig = visualizer.plot_magnitudes()  # Plot magnitude responses
-    phase_fig = visualizer.plot_phases()  # Plot phase responses
+    est_fig = vis_est.plot_magnitudes()  # Plot magnitude responses
+    ideal_fig = vis_ideal.plot_magnitudes()  # Plot phase responses
 
     # Save generated figures with high resolution
-    mag_fig.savefig('channel_magnitude_responses.png', bbox_inches='tight', dpi=300)
-    phase_fig.savefig('channel_phase_responses.png', bbox_inches='tight', dpi=300)
+    est_fig.savefig('mag_est.png', bbox_inches='tight', dpi=300)
+    ideal_fig.savefig('mag_ideal.png', bbox_inches='tight', dpi=300)
 
 
 if __name__ == "__main__":

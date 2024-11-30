@@ -1,5 +1,4 @@
 """Module for loading and processing .mat files containing channel estimates for PyTorch."""
-
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -8,7 +7,6 @@ from typing import Callable, List, Optional, Tuple, Union
 import scipy.io as sio
 import torch
 from torch.utils.data import Dataset, DataLoader
-from torchgen.executorch.api.et_cpp import return_type
 
 from utils import ComplexChannelProcessor
 
@@ -22,6 +20,7 @@ class ReturnType(Enum):
     CONCAT_TIME = "concat_time"
     INTERPOLATED_COMPLEX = "interpolated_complex",
     TWO_CHANNEL_ZERO = "2channel_zero"
+    COMPLEX_ZERO = "complex_zero"
 
     @classmethod
     def from_string(cls, value: str) -> "ReturnType":
@@ -144,8 +143,12 @@ class MatDataset(Dataset):
                     torch.real(h_ideal).unsqueeze(0),
                     torch.imag(h_ideal).unsqueeze(0)
                 ], dim=0)
-            else:  # ReturnType.COMPLEX
+            elif self.return_type == ReturnType.COMPLEX:  # ReturnType.COMPLEX
                 h_est = hp_ls
+            elif self.return_type == ReturnType.COMPLEX_ZERO:
+                h_est = hzero_ls
+            else:
+                raise ValueError(f"Unexpected return type: {self.return_type}")
 
             return h_est, h_ideal
 
@@ -215,7 +218,9 @@ class MatDataset(Dataset):
             h_ideal = torch.tensor(mat_data["H"][:, :, 0], dtype=torch.cfloat)
 
             # Process data based on return type
-            if self.return_type in (ReturnType.TWO_CHANNEL, ReturnType.COMPLEX, ReturnType.TWO_CHANNEL_ZERO):
+            if self.return_type in (
+                    ReturnType.TWO_CHANNEL, ReturnType.COMPLEX,
+                    ReturnType.TWO_CHANNEL_ZERO, ReturnType.COMPLEX_ZERO):
                 h_est, h_ideal = self._process_2channel_complex(h_ideal, mat_data)
             else:
                 h_est, h_ideal = self._process_time_based(h_ideal, mat_data)
@@ -239,7 +244,7 @@ class MatDataset(Dataset):
 def get_test_dataloaders(
     dataset_dir: Union[str, Path],
     params: dict,
-    return_type: str
+    return_type: str = "2channel_zero"
 ) -> List[Tuple[str, DataLoader]]:
     """Create DataLoaders for each subdirectory in the dataset directory.
 
@@ -284,7 +289,7 @@ def get_test_dataloaders(
         (name, DataLoader(
             dataset,
             batch_size=params["batch_size"],
-            shuffle=True,
+            shuffle=False,
             num_workers=0  # Safer default, can be overridden through params
         ))
         for name, dataset in test_datasets
