@@ -4,3 +4,4 @@ experiments/
 outputs
 results
 __pycache__/
+*.png
