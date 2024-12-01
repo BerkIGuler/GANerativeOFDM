@@ -3,6 +3,7 @@ dataset/
 experiments/
 outputs/
 results/
+paper_results/
 channel_analysis_results/
 __pycache__/
 *.png

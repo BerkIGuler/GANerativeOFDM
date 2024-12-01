@@ -6,9 +6,10 @@ from tqdm import tqdm
 import pandas as pd
 import scipy.io as sio
 from collections import defaultdict
+from dataloader import get_test_dataloaders
 
 from generator import UNet
-from dataloader import get_test_dataloaders
+import matplotlib.pyplot as plt
 
 
 def create_parser():
@@ -91,7 +92,7 @@ def process_quantitative_results(generator, dataloaders, device, output_dir, is_
 
     # Save to CSV
     dataset_type = 'test_noisy' if is_noisy else 'test'
-    csv_path = output_dir / f'model_{dataset_type}_snr.csv'
+    csv_path = output_dir / f'cGAN_{dataset_type}_snr.csv'
     df.to_csv(csv_path, index=False)
 
     return csv_path
@@ -106,25 +107,58 @@ def generate_qualitative_samples(generator, sample_path, output_dir, device):
     samples_output_dir = output_dir / 'samples'
     samples_output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Lists to store outputs for grid visualization
+    all_outputs = []
+    file_names = []
+
     # Process each .mat file
     for mat_file in tqdm(list(sample_dir.glob('*.mat')), desc='Generating samples'):
         # Load .mat file
         data = sio.loadmat(str(mat_file))
 
-        # Prepare input tensor (assuming same preprocessing as in dataloader)
-        input_data = torch.from_numpy(data['input']).float().unsqueeze(0).to(device)
+        # Prepare input tensor
+        complex_input = torch.tensor(data["H"][:, :, 1], dtype=torch.cfloat)
+        two_ch_input = torch.cat([
+            torch.real(complex_input).unsqueeze(0),
+            torch.imag(complex_input).unsqueeze(0)
+        ], dim=0).to(device).unsqueeze(0)
 
         # Generate sample
         with torch.no_grad():
-            output = generator(input_data)
+            output = generator(two_ch_input)
 
         # Convert to numpy and ensure correct shape (2, 120, 14)
         output_np = output.squeeze(0).cpu().numpy()
 
-        # Save as .npy file with same name as input
+        # Save individual .npy file
         output_path = samples_output_dir / f"{mat_file.stem}.npy"
         np.save(output_path, output_np)
 
+        # Store for grid visualization
+        all_outputs.append(output_np)
+        file_names.append(mat_file.stem)
+
+    # Create a grid visualization of magnitudes
+    fig, axes = plt.subplots(3, 2, figsize=(12, 15))
+
+    for idx, (output, fname) in enumerate(zip(all_outputs, file_names)):
+        # Calculate magnitude from real and imaginary parts
+        magnitude = np.sqrt(output[0] ** 2 + output[1] ** 2)
+
+        # Plot magnitude
+        row = idx // 2
+        col = idx % 2
+        im = axes[row, col].imshow(magnitude, cmap='viridis', aspect='auto')
+        axes[row, col].set_title(f'{fname}')
+        plt.colorbar(im, ax=axes[row, col])
+
+    # Adjust layout and save
+    plt.tight_layout()
+    grid_path = samples_output_dir / 'samples_grid.png'
+    plt.savefig(grid_path, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"Individual samples and grid visualization saved in {samples_output_dir}")
 
 def main():
     # Parse arguments
