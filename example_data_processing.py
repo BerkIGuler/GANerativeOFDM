@@ -13,7 +13,7 @@ from utils import ChannelVisualizer
 DATA_DIR = Path("./dataset").resolve()
 TRAIN_DIR = DATA_DIR / 'train'
 
-# Channel response matrix dimensions (18 subcarriers × 2 antennas)
+# Channel response matrix dimensions (18 subcarriers × 2 time indices)
 PILOT_DIMS = (18, 2)
 
 # Data transformation settings
@@ -58,7 +58,8 @@ def main():
     ideal_fig = vis_ideal.plot_magnitudes()  # Plot phase responses
 
     # Save generated figures with high resolution
-    est_fig.savefig('mag_est.png', bbox_inches='tight', dpi=300)
+    est_fig.savefig(''
+                    'ag_est.png', bbox_inches='tight', dpi=300)
     ideal_fig.savefig('mag_ideal.png', bbox_inches='tight', dpi=300)
 
 

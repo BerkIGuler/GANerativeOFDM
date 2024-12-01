@@ -41,3 +41,22 @@ python sample.py \
     --output_dir results/sampling_run1 \
     --device cuda
 `
+
+# Channel Statistics
+`python analyze_ofdm.py \
+    --data_dir /dataset/train \
+    --pilot_dims 18 2 \
+    --num_batches 100 \
+    --batch_size 256 \
+    --output_dir channel_analysis_results \
+    --device cuda:0`
+
+# Generate Paper Results
+`
+python generate_paper_results.py \
+    --checkpoint experiments/run11/best_model/model_checkpoint.pth \
+    --test_path dataset/test/SNR_test_set \
+    --test_noisy_path dataset/test_noisy/SNR_test_set \
+    --sample_path dataset/sample \
+    --output_dir paper_results
+`

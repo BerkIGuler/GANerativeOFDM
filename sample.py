@@ -37,13 +37,13 @@ def create_parser():
     return parser
 
 
-def calculate_mse_db(generator, dataloader, device):
-    """Calculate 10*log10(MSE) for the entire dataset"""
+def calculate_nmse_db(generator, dataloader, device):
+    """Calculate 10*log10(NMSE) for the entire dataset"""
     generator.eval()
-    mse_list = []
+    nmse_list = []
 
     with torch.no_grad():
-        for inputs, targets, _ in tqdm(dataloader, desc='Evaluating MSE'):
+        for inputs, targets, _ in tqdm(dataloader, desc='Evaluating NMSE'):
             # Move data to device
             inputs = inputs.to(device)
             targets = targets.to(device)
@@ -51,55 +51,62 @@ def calculate_mse_db(generator, dataloader, device):
             # Generate samples
             outputs = generator(inputs)
 
-            # Calculate MSE
-            mse = torch.nn.functional.mse_loss(outputs, targets, reduction='none')
-            mse = mse.mean(dim=(1, 2, 3))  # Average over channels and dimensions
+            # Calculate squared error
+            squared_error = torch.nn.functional.mse_loss(outputs, targets, reduction='none')
+
+            # Calculate power of the target signal
+            target_power = torch.mean(targets ** 2, dim=(1, 2, 3))
+
+            # Calculate NMSE (normalize MSE by target power)
+            # Add small epsilon to avoid division by zero
+            epsilon = 1e-10
+            nmse = torch.mean(squared_error, dim=(1, 2, 3)) / (target_power + epsilon)
 
             # Convert to dB scale
-            mse_db = 10 * torch.log10(mse)
+            nmse_db = 10 * torch.log10(nmse)
 
             # Store results
-            mse_list.extend(mse_db.cpu().numpy())
+            nmse_list.extend(nmse_db.cpu().numpy())
 
-    return np.array(mse_list)
+    return np.array(nmse_list)
 
 
-def calculate_statistics(mse_db_values):
-    """Calculate statistics for MSE values"""
+def calculate_statistics(nmse_db_values):
+    """Calculate statistics for NMSE values"""
     return {
-        'num_samples': len(mse_db_values),
-        'mean_mse_db': float(np.mean(mse_db_values)),
-        'median_mse_db': float(np.median(mse_db_values)),
-        'std_mse_db': float(np.std(mse_db_values)),
-        'min_mse_db': float(np.min(mse_db_values)),
-        'max_mse_db': float(np.max(mse_db_values)),
-        'percentile_5': float(np.percentile(mse_db_values, 5)),
-        'percentile_95': float(np.percentile(mse_db_values, 95))
+        'num_samples': len(nmse_db_values),
+        'mean_nmse_db': float(np.mean(nmse_db_values)),
+        'median_nmse_db': float(np.median(nmse_db_values)),
+        'std_nmse_db': float(np.std(nmse_db_values)),
+        'min_nmse_db': float(np.min(nmse_db_values)),
+        'max_nmse_db': float(np.max(nmse_db_values)),
+        'percentile_5': float(np.percentile(nmse_db_values, 5)),
+        'percentile_95': float(np.percentile(nmse_db_values, 95))
     }
 
 
-def plot_mse_histogram(mse_values, output_path, dataset_name):
-    """Plot histogram of MSE values"""
+def plot_nmse_histogram(nmse_values, output_path, dataset_name):
+    """Plot histogram of NMSE values"""
     plt.figure(figsize=(10, 6))
-    plt.hist(mse_values, bins=50, edgecolor='black')
-    plt.xlabel('MSE (dB)')
+    plt.hist(nmse_values, bins=50, edgecolor='black')
+    plt.xlabel('NMSE (dB)')
     plt.ylabel('Count')
-    plt.title(f'Distribution of MSE Values - {dataset_name}')
+    plt.title(f'Distribution of NMSE Values - {dataset_name}')
     plt.grid(True)
     plt.savefig(output_path)
     plt.close()
 
 
-def plot_combined_histogram(all_mse_values, dataset_names, output_path):
-    """Plot combined histogram of MSE values from all datasets"""
+def plot_combined_histogram(all_nmse_values, dataset_names, output_path):
+    """Plot combined histogram of NMSE values from all datasets"""
     plt.figure(figsize=(12, 8))
 
-    for mse_values, name in zip(all_mse_values, dataset_names):
-        plt.hist(mse_values, bins=50, alpha=0.5, label=name)
+    for nmse_values, name in zip(all_nmse_values, dataset_names):
+        plt.hist(nmse_values, bins=50, alpha=0.5, label=name)
 
-    plt.xlabel('MSE (dB)')
+    plt.xlabel('NMSE (dB)')
     plt.ylabel('Count')
-    plt.title('Distribution of MSE Values - All Datasets')
+    plt.title('Distribution of NMSE Values - All Datasets')
     plt.legend()
     plt.grid(True)
     plt.savefig(output_path)
@@ -129,41 +136,41 @@ def main():
 
     # Dictionary to store results for all datasets
     all_results = {}
-    all_mse_values = []
+    all_nmse_values = []
     dataset_names = []
 
     # Process each dataset
     for dataset_name, dataloader in test_dataloaders:
         print(f"\nProcessing dataset: {dataset_name}")
 
-        # Calculate MSE in dB scale for all samples
-        mse_db_values = calculate_mse_db(generator, dataloader, device)
-        all_mse_values.append(mse_db_values)
+        # Calculate NMSE in dB scale for all samples
+        nmse_db_values = calculate_nmse_db(generator, dataloader, device)
+        all_nmse_values.append(nmse_db_values)
         dataset_names.append(dataset_name)
 
         # Calculate statistics for this dataset
-        stats = calculate_statistics(mse_db_values)
+        stats = calculate_statistics(nmse_db_values)
         all_results[dataset_name] = stats
 
         # Plot individual histogram
-        plot_path = output_dir / f'mse_distribution_{dataset_name}.png'
-        plot_mse_histogram(mse_db_values, plot_path, dataset_name)
+        plot_path = output_dir / f'nmse_distribution_{dataset_name}.png'
+        plot_nmse_histogram(nmse_db_values, plot_path, dataset_name)
 
         # Print results for this dataset
         print(f"\nResults for {dataset_name}:")
         print(f"Number of test samples: {stats['num_samples']}")
-        print("\nMSE Statistics (dB):")
+        print("\nNMSE Statistics (dB):")
         for key, value in stats.items():
             if key != 'num_samples':
                 print(f"{key}: {value:.2f}")
 
     # Calculate aggregated statistics across all datasets
-    all_mse_combined = np.concatenate(all_mse_values)
-    all_results['combined'] = calculate_statistics(all_mse_combined)
+    all_nmse_combined = np.concatenate(all_nmse_values)
+    all_results['combined'] = calculate_statistics(all_nmse_combined)
 
     # Plot combined histogram
-    combined_plot_path = output_dir / 'mse_distribution_combined.png'
-    plot_combined_histogram(all_mse_values, dataset_names, combined_plot_path)
+    combined_plot_path = output_dir / 'nmse_distribution_combined.png'
+    plot_combined_histogram(all_nmse_values, dataset_names, combined_plot_path)
 
     # Save all results
     results_file = output_dir / 'sampling_results.json'

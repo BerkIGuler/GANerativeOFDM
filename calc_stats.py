@@ -2,10 +2,59 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
-from dataloader import MatDataset  # Using your existing dataloader
+from dataloader import MatDataset
 import seaborn as sns
 from pathlib import Path
 import json
+import argparse
+from tqdm import tqdm
+
+def create_parser():
+    """Create parser for command line arguments."""
+    parser = argparse.ArgumentParser(description='OFDM Channel Data Analysis Tool')
+
+    # Data parameters
+    parser.add_argument('--data_dir', type=str, required=True,
+                        help='Path to the dataset directory')
+    parser.add_argument('--pilot_dims', type=int, nargs=2, default=[2, 4],
+                        help='Dimensions of pilot pattern (height width)')
+
+    # Analysis parameters
+    parser.add_argument('--num_batches', type=int, default=None,
+                        help='Number of batches to analyze (default: all)')
+    parser.add_argument('--batch_size', type=int, default=32,
+                        help='Batch size for data loading')
+
+    # Output parameters
+    parser.add_argument('--output_dir', type=str, default='channel_analysis_results',
+                        help='Directory to save analysis results')
+
+    # Device selection
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
+                        help='Device to use for computations (cuda/cpu)')
+
+    return parser
+
+
+def calculate_correlation(data):
+    """Calculate correlation matrix for complex data."""
+    # Ensure data is 2D
+    if data.ndim > 2:
+        data = data.reshape(data.shape[0], -1)
+
+    # Convert to numpy for complex correlation calculation
+    data_np = data.cpu().numpy()
+    # Calculate correlation matrix
+    n = data_np.shape[1]
+    corr = np.zeros((n, n), dtype=np.complex64)
+
+    for i in range(n):
+        for j in range(n):
+            # Calculate complex correlation coefficient
+            x = data_np[:, i]
+            y = data_np[:, j]
+            corr[i, j] = np.mean(np.conjugate(x) * y)
+    return np.abs(corr)  # Return magnitude of correlation
 
 
 class OFDMChannelAnalyzer:
@@ -23,7 +72,7 @@ class OFDMChannelAnalyzer:
 
         print("Analyzing channel statistics...")
 
-        for batch_idx, (real_input, real_target, _) in enumerate(self.dataloader):
+        for batch_idx, (real_input, real_target, _) in enumerate(tqdm(self.dataloader)):
             if num_batches and batch_idx >= num_batches:
                 break
 
@@ -39,13 +88,13 @@ class OFDMChannelAnalyzer:
 
             # Calculate frequency correlation (across subcarriers)
             for t in range(channel.shape[2]):  # For each OFDM symbol
-                freq_corr = torch.corrcoef(channel[..., t].T)
-                frequency_coherence.append(freq_corr.cpu().numpy())
+                freq_corr = calculate_correlation(channel[..., t])
+                frequency_coherence.append(freq_corr)
 
             # Calculate time correlation (across OFDM symbols)
             for f in range(channel.shape[1]):  # For each subcarrier
-                time_corr = torch.corrcoef(channel[:, f, :].T)
-                time_coherence.append(time_corr.cpu().numpy())
+                time_corr = calculate_correlation(channel[:, f, :])
+                time_coherence.append(time_corr)
 
         # Combine statistics
         all_magnitudes = np.concatenate(all_magnitudes, axis=0)
@@ -58,79 +107,98 @@ class OFDMChannelAnalyzer:
             'magnitude_min': float(np.min(all_magnitudes)),
             'phase_mean': float(np.mean(all_phases)),
             'phase_std': float(np.std(all_phases)),
-            'frequency_coherence_mean': float(np.mean([np.mean(fc) for fc in frequency_coherence])),
-            'time_coherence_mean': float(np.mean([np.mean(tc) for tc in time_coherence]))
+            'frequency_coherence_mean': float(np.mean([np.mean(np.abs(fc)) for fc in frequency_coherence])),
+            'time_coherence_mean': float(np.mean([np.mean(np.abs(tc)) for tc in time_coherence]))
         }
 
         return stats, all_magnitudes, all_phases, frequency_coherence, time_coherence
 
-    def plot_channel_characteristics(self, stats, magnitudes, phases, freq_coherence, time_coherence,
-                                     output_dir='channel_analysis'):
+    @staticmethod
+    def plot_channel_characteristics(magnitudes, phases, output_dir='channel_analysis'):
         """Generate plots for channel characteristics."""
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True)
 
-        # 1. Magnitude distribution
+        # 1. Magnitude distribution with proper normalization and fewer bins
         plt.figure(figsize=(10, 6))
-        sns.histplot(magnitudes.flatten(), bins=50)
-        plt.title('Channel Magnitude Distribution')
+        mag_data = magnitudes.flatten()
+
+        # Use fewer bins (50 bins instead of Freedman-Diaconis rule)
+        n_bins = 50
+
+        # Plot normalized histogram
+        counts, bins, _ = plt.hist(mag_data, bins=n_bins, density=True)
+        plt.clf()  # Clear the figure
+
+        # Replot with proper normalization
+        plt.hist(mag_data, bins=bins, weights=np.ones_like(mag_data) / len(mag_data),
+                 alpha=0.7, color='blue', edgecolor='black')
+        plt.title('Channel Magnitude Distribution (Normalized)')
         plt.xlabel('Magnitude')
-        plt.ylabel('Count')
+        plt.ylabel('Probability')
+
+
         plt.savefig(output_dir / 'magnitude_distribution.png')
         plt.close()
 
-        # 2. Phase distribution
+        # 2. Phase distribution with proper normalization and fewer bins
         plt.figure(figsize=(10, 6))
-        sns.histplot(phases.flatten(), bins=50)
-        plt.title('Channel Phase Distribution')
+        phase_data = phases.flatten()
+
+        # Use fewer bins (50 bins instead of Freedman-Diaconis rule)
+        n_bins = 50
+
+        # Plot normalized histogram
+        counts, bins, _ = plt.hist(phase_data, bins=n_bins, density=True)
+        plt.clf()  # Clear the figure
+
+        # Replot with proper normalization
+        plt.hist(phase_data, bins=bins, weights=np.ones_like(phase_data) / len(phase_data),
+                 alpha=0.7, color='blue', edgecolor='black')
+        plt.title('Channel Phase Distribution (Normalized)')
         plt.xlabel('Phase (radians)')
-        plt.ylabel('Count')
+        plt.ylabel('Probability')
+
         plt.savefig(output_dir / 'phase_distribution.png')
         plt.close()
 
-        # 3. Average frequency correlation
-        plt.figure(figsize=(10, 8))
-        avg_freq_corr = np.mean(freq_coherence, axis=0)
-        sns.heatmap(avg_freq_corr, cmap='coolwarm')
-        plt.title('Average Frequency Correlation')
-        plt.xlabel('Subcarrier Index')
-        plt.ylabel('Subcarrier Index')
-        plt.savefig(output_dir / 'frequency_correlation.png')
-        plt.close()
-
-        # 4. Average time correlation
-        plt.figure(figsize=(10, 8))
-        avg_time_corr = np.mean(time_coherence, axis=0)
-        sns.heatmap(avg_time_corr, cmap='coolwarm')
-        plt.title('Average Time Correlation')
-        plt.xlabel('OFDM Symbol Index')
-        plt.ylabel('OFDM Symbol Index')
-        plt.savefig(output_dir / 'time_correlation.png')
-        plt.close()
-
-        # Save statistics to JSON
-        with open(output_dir / 'channel_statistics.json', 'w') as f:
-            json.dump(stats, f, indent=4)
-
 
 def main():
-    # Initialize dataset and dataloader (example parameters)
-    dataset = MatDataset(data_dir='path/to/your/data', pilot_dims=(2, 4))  # Adjust parameters
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=False)
+    # Parse arguments
+    parser = create_parser()
+    args = parser.parse_args()
+
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save arguments for reproducibility
+    with open(output_dir / 'analysis_args.json', 'w') as f:
+        json.dump(vars(args), f, indent=4)
+
+    # Initialize dataset and dataloader
+    dataset = MatDataset(
+        data_dir=args.data_dir,
+        pilot_dims=tuple(args.pilot_dims),
+        return_type="complex_zero"
+    )
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=False
+    )
 
     # Initialize analyzer
     analyzer = OFDMChannelAnalyzer(dataloader)
 
     # Perform analysis
     stats, magnitudes, phases, freq_coherence, time_coherence = analyzer.analyze_channel_statistics(
-        num_batches=100  # Adjust based on your needs
+        num_batches=args.num_batches
     )
 
     # Generate plots and save results
-    analyzer.plot_channel_characteristics(
-        stats, magnitudes, phases, freq_coherence, time_coherence,
-        output_dir='channel_analysis_results'
-    )
+    analyzer.plot_channel_characteristics(magnitudes, phases, output_dir=args.output_dir)
 
     # Print summary statistics
     print("\nChannel Statistics Summary:")
