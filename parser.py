@@ -20,8 +20,10 @@ def create_parser():
                         help='Training batch size')
     parser.add_argument('--d_loss_coef', type=float, default=0.5,
                         help='Discriminator loss coefficient')
-    parser.add_argument('--lr', type=float, default=0.0002,
-                        help='Learning rate')
+    parser.add_argument('--lr_g', type=float, default=0.0002,
+                        help='Learning rate generator')
+    parser.add_argument('--lr_d', type=float, default=0.0002,
+                        help='Learning rate discriminator')
     parser.add_argument('--beta1', type=float, default=0.5,
                         help='Beta1 parameter for Adam optimizer')
     parser.add_argument('--beta2', type=float, default=0.999,

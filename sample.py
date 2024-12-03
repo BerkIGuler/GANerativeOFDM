@@ -2,7 +2,6 @@ import argparse
 from pathlib import Path
 import torch
 import numpy as np
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 import json
 import matplotlib.pyplot as plt
@@ -125,11 +124,31 @@ def main():
     # Set device
     device = torch.device(args.device)
 
-    # Load model
+    # Load model with error handling
     generator = UNet().to(device)
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    generator.load_state_dict(checkpoint['generator_state_dict'])
-    generator.eval()
+    try:
+        checkpoint = torch.load(args.checkpoint, map_location=device)
+
+        # Check if it's a full training checkpoint or just model weights
+        if isinstance(checkpoint, dict):
+            if 'generator_state_dict' in checkpoint:
+                # Full training checkpoint
+                generator.load_state_dict(checkpoint['generator_state_dict'])
+            else:
+                # Direct state dict
+                generator.load_state_dict(checkpoint)
+        else:
+            raise ValueError("Checkpoint format not recognized")
+
+        generator.eval()
+        print(f"Successfully loaded checkpoint from {args.checkpoint}")
+
+    except Exception as e:
+        print(f"Error loading checkpoint from {args.checkpoint}: {str(e)}")
+        print("Please verify that the checkpoint file exists and is not corrupted.")
+        raise SystemExit(1)
+
+    # Rest of the code remains the same...
 
     # Create dataloaders for each subfolder
     test_dataloaders = get_test_dataloaders(args.data_path, vars(args))

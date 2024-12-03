@@ -1,9 +1,11 @@
 import torch
 import torch.nn as nn
 from torch.optim import Adam
-from torch.utils.data import DataLoader
-from typing import Tuple, Dict, Union
+from typing import Tuple, Dict, Union, List
 import numpy as np
+import os
+import json
+from datetime import datetime
 
 
 class CGANTrainer:
@@ -11,8 +13,10 @@ class CGANTrainer:
             self,
             generator: nn.Module,
             discriminator: nn.Module,
+            output_dir: str,
             lambda_l1: float = 100.0,
-            lr: float = 0.0002,
+            lr_g: float = 0.0002,
+            lr_d: float = 0.00002,
             beta1: float = 0.5,
             beta2: float = 0.999,
             discriminator_loss_coefficient: float = 1.0,
@@ -23,22 +27,83 @@ class CGANTrainer:
         self.discriminator = discriminator.to(device)
         self.lambda_l1 = lambda_l1
         self.device = device
+        self.output_dir = output_dir
+
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Initialize loss history
+        self.loss_history = {
+            'train': [],
+            'val': []
+        }
 
         # Initialize optimizers
         self.optimizer_G = Adam(
             generator.parameters(),
-            lr=lr,
+            lr=lr_g,
             betas=(beta1, beta2)
         )
         self.optimizer_D = Adam(
             discriminator.parameters(),
-            lr=lr,
+            lr=lr_d,
             betas=(beta1, beta2)
         )
 
         # Loss functions
         self.criterion_GAN = nn.BCEWithLogitsLoss()
         self.criterion_L1 = nn.L1Loss()
+
+        # Initialize loss logging files
+        self._init_loss_logs()
+
+    def _init_loss_logs(self):
+        """Initialize loss logging files with headers"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        # Create logging files
+        self.train_log_path = os.path.join(self.output_dir, f'train_losses_{timestamp}.csv')
+        self.val_log_path = os.path.join(self.output_dir, f'val_losses_{timestamp}.csv')
+
+        # Write headers
+        with open(self.train_log_path, 'w') as f:
+            f.write('epoch,D_real,D_fake,D_total,G_GAN,G_L1,G_total\n')
+
+        with open(self.val_log_path, 'w') as f:
+            f.write('epoch,val_G_GAN,val_G_L1,val_total\n')
+
+    def _log_losses(self, epoch: int, losses: Dict[str, float], is_train: bool = True):
+        """Log losses to appropriate file"""
+        log_path = self.train_log_path if is_train else self.val_log_path
+
+        # Prepare loss values in correct order
+        if is_train:
+            values = [
+                epoch,
+                losses.get('D_real', 0),
+                losses.get('D_fake', 0),
+                losses.get('D_total', 0),
+                losses.get('G_GAN', 0),
+                losses.get('G_L1', 0),
+                losses.get('G_total', 0)
+            ]
+        else:
+            values = [
+                epoch,
+                losses.get('val_G_GAN', 0),
+                losses.get('val_G_L1', 0),
+                losses.get('val_total', 0)
+            ]
+
+        # Write to CSV
+        with open(log_path, 'a') as f:
+            f.write(','.join(map(str, values)) + '\n')
+
+    def _save_loss_history(self):
+        """Save complete loss history to JSON"""
+        history_path = os.path.join(self.output_dir, 'loss_history.json')
+        with open(history_path, 'w') as f:
+            json.dump(self.loss_history, f, indent=4)
 
     def set_requires_grad(self, nets, requires_grad=False):
         """Set requies_grad=False for all the networks to avoid unnecessary computations"""
@@ -61,7 +126,6 @@ class CGANTrainer:
         real_concat = torch.cat([real_input, real_target], dim=1)
         pred_real = self.discriminator(real_concat)
         label_real = torch.ones_like(pred_real)
-        # log(D(x, y))
         loss_D_real = self.criterion_GAN(pred_real, label_real)
 
         # Fake pairs D(x, G(x, z))
@@ -69,15 +133,13 @@ class CGANTrainer:
         fake_concat = torch.cat([real_input, fake_target.detach()], dim=1)
         pred_fake = self.discriminator(fake_concat)
         label_fake = torch.zeros_like(pred_fake)
-        # log(1-D(x, G(x, z)))
         loss_D_fake = self.criterion_GAN(pred_fake, label_fake)
 
-        # Combined D loss (divided by 2 as mentioned in the paper)
+        # Combined D loss
         loss_D = (loss_D_real + loss_D_fake) * self.discriminator_loss_coefficient
         loss_D.backward()
         self.optimizer_D.step()
 
-        # Return losses for logging
         return loss_D, {
             'D_real': loss_D_real.item(),
             'D_fake': loss_D_fake.item(),
@@ -121,84 +183,85 @@ class CGANTrainer:
             real_target: torch.Tensor
     ) -> Dict[str, float]:
         """Perform one training step"""
-        # Move data to device
         real_input = real_input.to(self.device)
         real_target = real_target.to(self.device)
 
-        # Train D
         self.set_requires_grad(self.discriminator, True)
         loss_D, D_losses = self.train_discriminator(real_input, real_target)
 
-        # Train G
         self.set_requires_grad(self.discriminator, False)
         loss_G, G_losses = self.train_generator(real_input, real_target)
 
-        # Combine all losses for logging
         losses = {}
         losses.update(D_losses)
         losses.update(G_losses)
         return losses
 
     @torch.no_grad()
-    def evaluate(self, dataloader: DataLoader) -> Dict[str, float]:
+    def evaluate(self, val_pbar, epoch: int) -> Dict[str, float]:
         """Evaluate the model on the validation set"""
         self.generator.eval()
         self.discriminator.eval()
 
         val_losses = []
-        for real_input, real_target, _ in dataloader:
+        for real_input, real_target, _ in val_pbar:
             real_input = real_input.to(self.device)
             real_target = real_target.to(self.device)
 
-            # Generate fake target
             fake_target = self.generator(real_input)
-
-            # Calculate L1 loss
             loss_L1 = self.criterion_L1(fake_target, real_target) * self.lambda_l1
 
-            # Calculate GAN loss
             fake_concat = torch.cat([real_input, fake_target], dim=1)
             pred_fake = self.discriminator(fake_concat)
             label_real = torch.ones_like(pred_fake)
             loss_G_GAN = self.criterion_GAN(pred_fake, label_real)
 
-            # Calculate total loss
             loss_total = loss_G_GAN + loss_L1
 
-            val_losses.append({
+            batch_losses = {
                 'val_G_GAN': loss_G_GAN.item(),
                 'val_G_L1': loss_L1.item(),
                 'val_total': loss_total.item()
-            })
+            }
+            val_losses.append(batch_losses)
+            val_pbar.set_postfix(**{k: f'{v:.4f}' for k, v in batch_losses.items()})
 
-        # Calculate average validation losses
         avg_val_losses = {}
         for key in val_losses[0].keys():
             avg_val_losses[key] = np.mean([x[key] for x in val_losses])
+
+        # Log validation losses
+        self._log_losses(epoch, avg_val_losses, is_train=False)
+        self.loss_history['val'].append(avg_val_losses)
 
         self.generator.train()
         self.discriminator.train()
 
         return avg_val_losses
 
-    def train_epoch(self, train_dataloader: DataLoader, val_dataloader: DataLoader = None) -> Dict[str, float]:
+    def train_epoch(self, train_pbar, val_pbar=None, epoch: int = 0) -> Dict[str, float]:
         """Train for one epoch and optionally evaluate"""
-        # Training
         epoch_losses = []
-        for batch_data in train_dataloader:
+        for batch_data in train_pbar:
             real_input, real_target, _ = batch_data
             batch_losses = self.train_step(real_input, real_target)
             epoch_losses.append(batch_losses)
+            train_pbar.set_postfix(**{k: f'{v:.4f}' for k, v in batch_losses.items()})
 
-        # Calculate average training losses
         avg_losses = {}
         for key in epoch_losses[0].keys():
             avg_losses[key] = np.mean([x[key] for x in epoch_losses])
 
-        # Validation if dataloader provided
-        if val_dataloader is not None:
-            val_losses = self.evaluate(val_dataloader)
+        # Log training losses
+        self._log_losses(epoch, avg_losses, is_train=True)
+        self.loss_history['train'].append(avg_losses)
+
+        if val_pbar is not None:
+            val_losses = self.evaluate(val_pbar, epoch)
             avg_losses.update(val_losses)
+
+        # Save complete loss history after each epoch
+        self._save_loss_history()
 
         return avg_losses
 
@@ -210,17 +273,19 @@ class CGANTrainer:
             'discriminator_state_dict': self.discriminator.state_dict(),
             'optimizer_G_state_dict': self.optimizer_G.state_dict(),
             'optimizer_D_state_dict': self.optimizer_D.state_dict(),
+            'loss_history': self.loss_history  # Include complete loss history in checkpoint
         }
         if val_losses is not None:
             checkpoint['val_losses'] = val_losses
         torch.save(checkpoint, path)
 
     def load_checkpoint(self, path: str) -> Tuple[int, Dict[str, float]]:
-        """Load a training checkpoint. Returns the epoch number and validation losses if available."""
+        """Load a training checkpoint"""
         checkpoint = torch.load(path)
         self.generator.load_state_dict(checkpoint['generator_state_dict'])
         self.discriminator.load_state_dict(checkpoint['discriminator_state_dict'])
         self.optimizer_G.load_state_dict(checkpoint['optimizer_G_state_dict'])
         self.optimizer_D.load_state_dict(checkpoint['optimizer_D_state_dict'])
+        self.loss_history = checkpoint.get('loss_history', {'train': [], 'val': []})
         val_losses = checkpoint.get('val_losses', None)
         return checkpoint['epoch'], val_losses

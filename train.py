@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 import torch
 from pathlib import Path
 import json
+from tqdm import tqdm
 
 
 def save_dict_to_json(d, filepath):
@@ -47,7 +48,7 @@ def main():
         norm_layer=torch.nn.BatchNorm2d
     )
 
-    # Create data loaders
+    # Create data loaders with tqdm
     train_dataloader = DataLoader(
         dataset=MatDataset(data_dir=args.train_path, pilot_dims=tuple(args.pilot_dims)),
         batch_size=args.batch_size,
@@ -65,7 +66,9 @@ def main():
         generator=generator,
         discriminator=discriminator,
         lambda_l1=args.lambda_l1,
-        lr=args.lr,
+        output_dir=args.output_dir,
+        lr_g=args.lr_g,
+        lr_d=args.lr_d,
         beta1=args.beta1,
         beta2=args.beta2,
         device=device,
@@ -78,12 +81,16 @@ def main():
         start_epoch, _ = trainer.load_checkpoint(args.resume)
         print(f"Resuming from epoch {start_epoch}")
 
-    # Training loop
+    # Training loop with tqdm
     best_val_loss = float('inf')
+    epoch_pbar = tqdm(range(start_epoch, args.num_epochs), desc="Training Progress")
 
-    for epoch in range(start_epoch, args.num_epochs):
+    for epoch in epoch_pbar:
         # Train and evaluate
-        losses = trainer.train_epoch(train_dataloader, val_dataloader)
+        train_pbar = tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{args.num_epochs} (Train)", leave=False)
+        val_pbar = tqdm(val_dataloader, desc=f"Epoch {epoch + 1}/{args.num_epochs} (Val)", leave=False)
+
+        losses = trainer.train_epoch(train_pbar, val_pbar)
 
         # Split and store losses
         train_losses = {k: v for k, v in losses.items() if not k.startswith('val_')}
@@ -98,15 +105,9 @@ def main():
             **val_losses
         })
 
-        # Print losses
-        print(f"Epoch [{epoch + 1}/{args.num_epochs}]")
-        print("Training Losses:")
-        for name, value in train_losses.items():
-            print(f"{name}: {value:.4f}")
-
-        print("Validation Losses:")
-        for name, value in val_losses.items():
-            print(f"{name}: {value:.4f}")
+        # Update progress bar description with losses
+        loss_str = f"Train Loss: {train_losses.get('total', 0):.4f}, Val Loss: {val_losses.get('val_total', 0):.4f}"
+        epoch_pbar.set_postfix_str(loss_str)
 
         # Save checkpoint at specified frequency
         if (epoch + 1) % args.save_freq == 0:

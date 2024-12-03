@@ -1,0 +1,13 @@
+python train.py \
+    --train_path dataset/train_small \
+    --val_path dataset/val_small \
+    --output_dir experiments/debug \
+    --batch_size 256 \
+    --lr_g 0.0001 \
+    --lr_d 0.00001 \
+    --lambda_l1 1 \
+    --dropout 0.25 \
+    --num_epochs 100 \
+    --save_freq 1 \
+    --device cuda:0 \
+    --d_loss_coef 1
