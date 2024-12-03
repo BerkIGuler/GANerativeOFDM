@@ -3,7 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from dataloader import MatDataset
-import seaborn as sns
 from pathlib import Path
 import json
 import argparse
